@@ -1,0 +1,33 @@
+{{ include "platform-microservice.fullname" . }} ({{ .Chart.Name }}-{{ .Chart.Version }}) deployed to namespace {{ include "platform-microservice.namespace" . }}.
+
+Image:    {{ include "platform-microservice.image" . }}
+Replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} (HPA){{ else }}{{ .Values.replicaCount }}{{ end }}
+{{- if .Values.service.enabled }}
+Service:  {{ include "platform-microservice.fullname" . }}:{{ .Values.service.port }} ({{ .Values.service.type }})
+{{- end }}
+{{- if .Values.logging.enabled }}
+OTel collector sidecar: enabled (logs from {{ .Values.logging.logPath }})
+{{- end }}
+
+Check rollout status:
+
+  kubectl rollout status deployment/{{ include "platform-microservice.fullname" . }} -n {{ include "platform-microservice.namespace" . }}
+
+{{- if .Values.httproute.enabled }}
+
+Routed through Gateway {{ .Values.httproute.gateway.name }}{{ with .Values.httproute.gateway.namespace }} (namespace {{ . }}){{ end }}:
+{{- range .Values.httproute.hostnames }}
+  https://{{ . }}
+{{- end }}
+{{- range .Values.httproute.rules }}
+{{- range .matches }}
+  path {{ .path.type }} {{ .path.value }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and .Values.service.enabled (not (or .Values.httproute.enabled .Values.ingress.enabled)) }}
+
+No HTTPRoute or Ingress is enabled; reach the service locally with:
+
+  kubectl port-forward svc/{{ include "platform-microservice.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ include "platform-microservice.namespace" . }}
+{{- end }}

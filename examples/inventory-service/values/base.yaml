@@ -1,0 +1,66 @@
+# Settings that are the same for inventory-service in every environment.
+# Used together with an environment overlay:
+#
+#   helm upgrade --install inventory-service \
+#     oci://596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/charts/platform-microservice \
+#     --version 2.0.0 \
+#     -f values/base.yaml -f values/dev.yaml
+
+# Keeps object names stable regardless of the release name.
+nameOverride: inventory-service
+
+service:
+  type: ClusterIP
+  port: 13740
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 30 # Conservative: avoid killing during slow startup
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5 # Aggressive: start serving traffic quickly
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 2
+
+imagePullSecrets:
+  - ecr-registry-secret
+
+config:
+  SERVICE_NAME: inventory-service
+  LOG_FILE_PATH: /logs/otel-logs.json
+  TOPIC_NAME: inventory.transaction.status.updated
+  KAFKA_CONSUMER_GROUP: inventory-service-group
+  KAFKA_CA_FILE_PATH: /etc/secrets/ca.pem
+
+# Kafka CA bundle, mounted at /etc/secrets/ca.pem.
+secretFiles:
+  enabled: true
+  mountPath: /etc/secrets
+  files:
+    ca.pem: |
+      -----BEGIN CERTIFICATE-----
+      REPLACE_WITH_KAFKA_CA
+      -----END CERTIFICATE-----
+
+logging:
+  enabled: true
+  logPath: /logs
+  format: json
+  otelCollector:
+    image: otel/opentelemetry-collector-contrib:0.93.0
+  metrics:
+    enabled: true
+    path: /metrics
+    scrapeInterval: 30s
+  extraLabels:
+    team: platform
+    service: inventory-service

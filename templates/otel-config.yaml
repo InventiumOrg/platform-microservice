@@ -1,0 +1,223 @@
+{{- if .Values.logging.enabled }}
+{{- $logging := .Values.logging }}
+{{- $debug := $logging.otelCollector.debug }}
+{{- $logExporters := list }}
+{{- if $logging.loki.enabled }}{{ $logExporters = append $logExporters "loki" }}{{ end }}
+{{- if $debug }}{{ $logExporters = append $logExporters "logging" }}{{ end }}
+{{- if not $logExporters }}{{ $logExporters = list "debug" }}{{ end }}
+{{- $metricExporters := list }}
+{{- if $logging.metrics.enabled }}{{ $metricExporters = append $metricExporters "prometheusremotewrite" }}{{ end }}
+{{- if $debug }}{{ $metricExporters = append $metricExporters "logging" }}{{ end }}
+{{- if not $metricExporters }}{{ $metricExporters = list "debug" }}{{ end }}
+{{- $traceExporters := list }}
+{{- if $logging.tempo.enabled }}{{ $traceExporters = append $traceExporters "otlp/tempo" }}{{ end }}
+{{- if $debug }}{{ $traceExporters = append $traceExporters "debug" }}{{ end }}
+{{- if not $traceExporters }}{{ $traceExporters = list "debug" }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "platform-microservice.otelConfigMapName" . }}
+  namespace: {{ include "platform-microservice.namespace" . }}
+  labels:
+    {{- include "platform-microservice.labels" . | nindent 4 }}
+  {{- with include "platform-microservice.annotations" . | trim }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+data:
+  config.yaml: |
+    receivers:
+      # File log receiver
+      filelog:
+        include:
+          - {{ $logging.logPath }}/*.log
+          - {{ $logging.logPath }}/*.json
+        start_at: beginning
+        {{- if eq $logging.format "json" }}
+        operators:
+          - type: json_parser
+            timestamp:
+              parse_from: attributes.timestamp
+              layout: '%Y-%m-%dT%H:%M:%SZ'
+          - type: move
+            from: attributes.msg
+            to: body
+            if: 'attributes.msg != nil'
+          - type: move
+            from: attributes.level
+            to: attributes["log.level"]
+            if: 'attributes.level != nil'
+          - type: remove
+            field: attributes.timestamp
+        {{- end }}
+
+      # OTLP receiver for direct instrumentation
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      # Prometheus receiver to scrape app metrics
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: {{ include "platform-microservice.fullname" . }}
+              scrape_interval: {{ $logging.metrics.scrapeInterval | default "30s" }}
+              static_configs:
+                - targets: ['localhost:{{ .Values.service.port }}']
+              metrics_path: {{ $logging.metrics.path | default "/metrics" }}
+
+    processors:
+      # Add resource attributes
+      resource:
+        attributes:
+          - key: service.name
+            value: {{ include "platform-microservice.fullname" . }}
+            action: upsert
+          - key: service.namespace
+            value: {{ include "platform-microservice.namespace" . }}
+            action: upsert
+          - key: deployment.environment
+            value: {{ $logging.environment | default "production" }}
+            action: upsert
+          {{- range $key, $value := $logging.extraLabels }}
+          - key: {{ $key }}
+            value: {{ $value }}
+            action: upsert
+          {{- end }}
+
+      # Add log-specific attributes
+      attributes/logs:
+        actions:
+          - key: loki.attribute.labels
+            value: service.name, service.namespace, deployment.environment, team
+            action: insert
+
+      # Batch processor for better performance
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+
+      # Memory limiter to prevent OOM
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      {{- if $logging.tempo.enabled }}
+      # Tempo exporter for traces (OTLP). Endpoint comes from $TEMPO_URL.
+      otlp/tempo:
+        endpoint: ${TEMPO_URL}
+        tls:
+          {{- if $logging.insecure }}
+          insecure: true
+          insecure_skip_verify: true
+          {{- else }}
+          insecure: false
+          insecure_skip_verify: false
+          {{- end }}
+        {{- if $logging.tempo.username }}
+        auth:
+          authenticator: basicauth/tempo
+        {{- end }}
+        compression: gzip
+        timeout: 30s
+      {{- end }}
+
+      {{- if $logging.loki.enabled }}
+      # Loki exporter for logs. Endpoint comes from $LOKI_URL.
+      loki:
+        endpoint: ${LOKI_URL}
+        {{- if $logging.loki.tenantId }}
+        tenant_id: ${LOKI_TENANT_ID}
+        {{- end }}
+        {{- if $logging.loki.username }}
+        auth:
+          authenticator: basicauth/loki
+        {{- end }}
+      {{- end }}
+
+      {{- if $logging.metrics.enabled }}
+      # Prometheus remote write for metrics. Endpoint comes from $PROMETHEUS_URL.
+      prometheusremotewrite:
+        endpoint: ${PROMETHEUS_URL}
+        {{- if $logging.prometheus.username }}
+        auth:
+          authenticator: basicauth/prometheus
+        {{- end }}
+        resource_to_telemetry_conversion:
+          enabled: true
+      {{- end }}
+
+      # Logging exporter for debugging
+      logging:
+        loglevel: {{ $logging.otelCollector.logLevel | default "info" }}
+
+      # Debug exporter
+      debug:
+        verbosity: {{ if $debug }}detailed{{ else }}normal{{ end }}
+
+    extensions:
+      # Health check extension
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+      {{- if and $logging.loki.enabled $logging.loki.username }}
+      basicauth/loki:
+        client_auth:
+          username: ${LOKI_USERNAME}
+          password: ${LOKI_PASSWORD}
+      {{- end }}
+
+      {{- if and $logging.tempo.enabled $logging.tempo.username }}
+      basicauth/tempo:
+        client_auth:
+          username: ${TEMPO_USERNAME}
+          password: ${TEMPO_PASSWORD}
+      {{- end }}
+
+      {{- if and $logging.metrics.enabled $logging.prometheus.username }}
+      # Basic auth for Prometheus
+      basicauth/prometheus:
+        client_auth:
+          username: ${PROMETHEUS_USERNAME}
+          password: ${PROMETHEUS_PASSWORD}
+      {{- end }}
+
+    service:
+      extensions:
+        - health_check
+        {{- if and $logging.loki.enabled $logging.loki.username }}
+        - basicauth/loki
+        {{- end }}
+        {{- if and $logging.tempo.enabled $logging.tempo.username }}
+        - basicauth/tempo
+        {{- end }}
+        {{- if and $logging.metrics.enabled $logging.prometheus.username }}
+        - basicauth/prometheus
+        {{- end }}
+
+      pipelines:
+        logs:
+          receivers: [filelog, otlp]
+          processors: [memory_limiter, resource, attributes/logs, batch]
+          exporters: [{{ join ", " $logExporters }}]
+
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [{{ join ", " $metricExporters }}]
+
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [{{ join ", " $traceExporters }}]
+
+      telemetry:
+        logs:
+          level: {{ $logging.otelCollector.logLevel | default "info" }}
+        metrics:
+          address: 0.0.0.0:8888
+{{- end }}

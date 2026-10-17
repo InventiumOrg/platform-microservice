@@ -1,0 +1,61 @@
+{{- if .Values.httproute.enabled }}
+{{- $cors := .Values.httproute.cors | default dict }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "platform-microservice.fullname" . }}
+  namespace: {{ include "platform-microservice.namespace" . }}
+  labels:
+    {{- include "platform-microservice.labels" . | nindent 4 }}
+    {{- with .Values.httproute.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (merge (dict) (.Values.httproute.annotations | default dict) (.Values.commonAnnotations | default dict)) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - name: {{ required "httproute.gateway.name is required when httproute is enabled" .Values.httproute.gateway.name }}
+      {{- with .Values.httproute.gateway.namespace }}
+      namespace: {{ . }}
+      {{- end }}
+      {{- with .Values.httproute.gateway.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  {{- with .Values.httproute.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.httproute.rules }}
+    {{- $filters := .filters | default list }}
+    {{- if $cors.enabled }}
+    {{- $filters = append $filters (dict "type" "CORS" "cors" (omit $cors "enabled")) }}
+    {{- end }}
+    -
+      {{- with .name }}
+      name: {{ . }}
+      {{- end }}
+      {{- with .matches }}
+      matches:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $filters }}
+      filters:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .timeouts }}
+      timeouts:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      backendRefs:
+        {{- if .backendRefs }}
+        {{- toYaml .backendRefs | nindent 8 }}
+        {{- else }}
+        - name: {{ include "platform-microservice.fullname" $ }}
+          kind: Service
+          port: {{ $.Values.service.port }}
+        {{- end }}
+    {{- end }}
+{{- end }}

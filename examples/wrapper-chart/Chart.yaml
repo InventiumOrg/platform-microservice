@@ -1,0 +1,17 @@
+# Wrapper chart: copy this into a service repo when the service needs its own
+# extra Kubernetes objects (CronJob, ExternalSecret, custom CRs) alongside the
+# shared templates. Service-specific templates go in ./templates.
+#
+#   helm dependency update .
+#   helm upgrade --install inventory-service . -f values/dev.yaml
+apiVersion: v2
+name: inventory-service
+description: Inventory service deployment, built on the shared platform-microservice chart
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: platform-microservice
+    version: 2.0.0
+    repository: oci://596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/charts

@@ -1,0 +1,7 @@
+*.env
+.cursor
+
+# Helm build artifacts
+*.tgz
+charts/
+Chart.lock

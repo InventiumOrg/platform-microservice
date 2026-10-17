@@ -1,0 +1,33 @@
+# Values for the shared chart must be nested under its name.
+platform-microservice:
+  nameOverride: inventory-service
+  namespace: inventory-service
+
+  image:
+    repository: 596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/inventory-service
+    tag: "1.0.0"
+
+  imagePullSecrets:
+    - ecr-registry-secret
+
+  service:
+    port: 13740
+
+  httproute:
+    enabled: true
+    gateway:
+      name: kong
+      namespace: kong
+    hostnames:
+      - api.inventium.io
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /v1/inventory
+
+  config:
+    SERVICE_NAME: inventory-service
+
+  existingSecrets:
+    - inventory-service-env

@@ -1,0 +1,57 @@
+namespace: inventory-service
+
+image:
+  repository: 743008455320.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/inventory-service
+  tag: 21-73
+  pullPolicy: Always
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+httproute:
+  enabled: true
+  gateway:
+    name: kong
+    namespace: kong
+  hostnames:
+    - api.inventium.localhost
+  annotations:
+    konghq.com/rewrite: /
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/inventory
+
+config:
+  FRONTEND_CLIENT: http://inventium.localhost
+  ENVIRONMENT: local
+  OTEL_EXPORTER_OTLP_ENDPOINT: localhost:4318
+  OTEL_RESOURCE_ATTRIBUTES: service.name=inventory-service,service.version=1.0.0,deployment.environment=local
+  KAFKA_URI: inventium-kafka-dc1-inventium01.d.aivencloud.com:16690
+  SCHEMA_REGISTRY_URL: https://inventium-kafka-dc1-inventium01.d.aivencloud.com:16682
+
+logging:
+  environment: local
+  otelCollector:
+    debug: true
+  # Local clusters have no Loki/Tempo; everything goes to the debug exporter.
+  loki:
+    enabled: false
+  tempo:
+    enabled: false
+  metrics:
+    enabled: false
+
+# Credentials live outside the chart. Create the secret once per namespace:
+#   kubectl create secret generic inventory-service-env \
+#     --from-env-file=app.env -n inventory-service
+existingSecrets:
+  - inventory-service-env

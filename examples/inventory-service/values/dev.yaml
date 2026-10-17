@@ -1,0 +1,40 @@
+namespace: inventory-service
+
+image:
+  repository: 596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/inventory-service
+  tag: "0.1.0"
+
+replicaCount: 2
+
+httproute:
+  enabled: true
+  gateway:
+    name: kong
+    namespace: kong
+  hostnames:
+    - api.dev.inventium.io
+  annotations:
+    konghq.com/rewrite: /
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/inventory
+
+config:
+  ENVIRONMENT: dev
+  OTEL_EXPORTER_OTLP_ENDPOINT: localhost:4318
+  KAFKA_URI: inventium-kafka-dc1-inventium01.d.aivencloud.com:16690
+  SCHEMA_REGISTRY_URL: https://inventium-kafka-dc1-inventium01.d.aivencloud.com:16682
+
+logging:
+  environment: dev
+  loki:
+    username: inventium
+  tempo:
+    username: inventium
+  prometheus:
+    username: inventium
+
+existingSecrets:
+  - inventory-service-env

@@ -1,0 +1,69 @@
+namespace: inventory-service
+
+image:
+  repository: 596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/inventory-service
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: inventory-service
+
+httproute:
+  enabled: true
+  gateway:
+    name: kong
+    namespace: kong
+  hostnames:
+    - api.inventium.io
+  annotations:
+    konghq.com/rewrite: /
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/inventory
+      timeouts:
+        request: 10s
+
+config:
+  ENVIRONMENT: production
+  OTEL_EXPORTER_OTLP_ENDPOINT: localhost:4318
+  KAFKA_URI: inventium-kafka-dc1-inventium01.d.aivencloud.com:16690
+  SCHEMA_REGISTRY_URL: https://inventium-kafka-dc1-inventium01.d.aivencloud.com:16682
+
+logging:
+  environment: production
+  loki:
+    username: inventium
+  tempo:
+    username: inventium
+  prometheus:
+    username: inventium
+  metrics:
+    enabled: true
+
+existingSecrets:
+  - inventory-service-env

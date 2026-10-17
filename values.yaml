@@ -1,0 +1,320 @@
+# Default values for the centralized platform-microservice chart.
+# Every service overrides only what it needs; everything here is a safe default
+# except `image.repository`, which each service must set.
+
+## -----------------------------------------------------------------------------
+## Naming
+## -----------------------------------------------------------------------------
+# Resource names are built from `nameOverride`, falling back to the release name.
+# Set this to the service name (e.g. inventory-service) when the release name
+# differs, so rendered object names stay stable.
+nameOverride: ""
+# Replaces the computed name entirely.
+fullnameOverride: ""
+
+# Namespace for every rendered object. Empty means the release namespace.
+namespace: ""
+
+# Extra labels/annotations added to every object this chart renders.
+commonLabels: {}
+commonAnnotations: {}
+
+## -----------------------------------------------------------------------------
+## Workload
+## -----------------------------------------------------------------------------
+replicaCount: 1
+revisionHistoryLimit: 10
+
+# Deployment update strategy. Empty uses the Kubernetes default (RollingUpdate).
+strategy: {}
+  # type: RollingUpdate
+  # rollingUpdate:
+  #   maxSurge: 25%
+  #   maxUnavailable: 0
+
+image:
+  # Required: full image repository, e.g.
+  # 596484148719.dkr.ecr.ap-southeast-1.amazonaws.com/inventium/inventory-service
+  repository: ""
+  pullPolicy: IfNotPresent
+  # Overrides the image tag, whose default is the chart appVersion.
+  tag: ""
+
+# Accepts a plain string, a list of strings, or the Kubernetes list-of-maps form.
+imagePullSecrets: []
+  # - ecr-registry-secret
+
+serviceAccount:
+  # Specifies whether a service account should be created.
+  create: false
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: false
+  # Annotations to add to the service account (e.g. IRSA role ARN).
+  annotations: {}
+  # The name of the service account to use. If not set and create is true,
+  # a name is generated using the fullname template.
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# Override the container entrypoint.
+command: []
+args: []
+
+# Roll pods automatically when the chart-managed ConfigMap/Secret content changes.
+rollOnConfigChange: true
+
+terminationGracePeriodSeconds: 30
+priorityClassName: ""
+
+lifecycle: {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "sleep 5"]
+
+# Extra containers and init containers, rendered as-is.
+initContainers: []
+extraContainers: []
+
+## -----------------------------------------------------------------------------
+## Service & networking
+## -----------------------------------------------------------------------------
+service:
+  enabled: true
+  type: ClusterIP
+  # Primary application port. Also used as the container port and as the
+  # HTTPRoute/Ingress backend port.
+  port: 8080
+  # Name of the primary port; probes and HTTPRoute default to it.
+  name: http
+  protocol: TCP
+  annotations: {}
+  # Additional service ports (gRPC, metrics, ...).
+  extraPorts: []
+    # - name: grpc
+    #   port: 9090
+    #   targetPort: grpc
+    #   protocol: TCP
+
+# Additional container ports, beyond the primary service port.
+extraContainerPorts: []
+  # - name: grpc
+  #   containerPort: 9090
+  #   protocol: TCP
+
+# Gateway API HTTPRoute (Kong, Envoy, ...).
+httproute:
+  enabled: false
+  labels: {}
+  annotations: {}
+  gateway:
+    name: ""
+    namespace: ""
+    # Attach to a single listener of the Gateway
+    # sectionName: https
+  hostnames: []
+  # CORS filter (Gateway API experimental channel, v1.3+), appended to every rule.
+  # Every key except `enabled` is passed through to the filter's `cors` block.
+  cors:
+    enabled: false
+    # allowOrigins:
+    #   - "https://app.example.com"
+    # allowMethods: [GET, POST]
+    # allowHeaders: [Content-Type, Authorization]
+    # allowCredentials: true
+    # maxAge: 600
+  # Each rule may set: name, matches, filters, timeouts, backendRefs.
+  # `matches` and `filters` are rendered as-is, so method/headers/queryParams
+  # matches and any filter type (URLRewrite, RequestHeaderModifier, ...) work.
+  # `backendRefs` defaults to this chart's Service on `service.port`.
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+# Plain Ingress, for clusters not running Gateway API.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+    # - secretName: chart-example-tls
+    #   hosts:
+    #     - chart-example.local
+
+## -----------------------------------------------------------------------------
+## Resources, probes & scaling
+## -----------------------------------------------------------------------------
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Probes are rendered as-is; `port: http` tracks `service.name`.
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 30 # Conservative: avoid killing during slow startup
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5 # Aggressive: start serving traffic quickly
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 2
+
+# Disabled by default; set a probe body to enable.
+startupProbe: {}
+  # httpGet:
+  #   path: /healthz
+  #   port: http
+  # failureThreshold: 30
+  # periodSeconds: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+  # Extra HPA metrics, rendered as-is.
+  metrics: []
+  # HPA scaling behavior, rendered as-is.
+  behavior: {}
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+## -----------------------------------------------------------------------------
+## Configuration & secrets
+## -----------------------------------------------------------------------------
+# Non-sensitive configuration. Rendered into a ConfigMap and loaded as env vars.
+config: {}
+  # SERVICE_NAME: inventory-service
+  # LOG_FILE_PATH: /logs/otel-logs.json
+
+# Sensitive configuration. Rendered into a Secret and loaded as env vars.
+# Keys are used verbatim as environment variable names. Do not commit real
+# values: pass them with --set-file / --set, or use `existingSecrets`.
+secrets: {}
+  # DB_SOURCE: postgresql://...
+
+# Names of ConfigMaps/Secrets managed outside this chart, loaded as env vars.
+existingConfigMaps: []
+existingSecrets: []
+  # - inventory-service-secrets
+
+# Explicit env entries, rendered as-is (valueFrom, field refs, ...).
+env: []
+  # - name: POD_IP
+  #   valueFrom:
+  #     fieldRef:
+  #       fieldPath: status.podIP
+
+# Extra envFrom entries, rendered as-is.
+extraEnvFrom: []
+
+# Files rendered into a Secret and mounted into the main container,
+# e.g. a Kafka CA bundle. Point the app at <mountPath>/<key>.
+secretFiles:
+  enabled: false
+  mountPath: /etc/secrets
+  # Mount an externally managed secret instead of creating one.
+  existingSecret: ""
+  files: {}
+    # ca.pem: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+
+# Mount `config` as files as well as env vars (same ConfigMap).
+configMount:
+  enabled: false
+  mountPath: /etc/config
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+  # - name: foo
+  #   secret:
+  #     secretName: mysecret
+  #     optional: false
+
+# Additional volumeMounts on the main container.
+volumeMounts: []
+  # - name: foo
+  #   mountPath: /etc/foo
+  #   readOnly: true
+
+## -----------------------------------------------------------------------------
+## Observability: OpenTelemetry collector sidecar
+## -----------------------------------------------------------------------------
+logging:
+  enabled: false
+  insecure: false
+  logPath: /logs
+  format: json # json or text
+  environment: production # local, dev, staging, production
+  otelCollector:
+    image: otel/opentelemetry-collector-contrib:0.93.0
+    logLevel: info # debug, info, warn, error
+    debug: false # Enable logging exporter for debugging
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  # Endpoints and credentials come from env vars on the sidecar (LOKI_URL,
+  # TEMPO_URL, PROMETHEUS_URL, *_USERNAME, *_PASSWORD), so put them in
+  # `config`/`secrets` or an existing secret. Setting `username` below only
+  # switches the basic-auth extension on.
+  loki:
+    enabled: true
+    username: "" # Set if using Loki Cloud with auth
+    tenantId: "" # Set if using multi-tenant Loki
+  tempo:
+    enabled: true
+    username: "" # Set if using Tempo Cloud with auth
+  prometheus:
+    username: "" # Set if using Prometheus Cloud with auth
+  metrics:
+    enabled: false
+    path: /metrics
+    scrapeInterval: 30s
+  extraLabels: {}
+    # team: platform

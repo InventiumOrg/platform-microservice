@@ -1,0 +1,23 @@
+apiVersion: v2
+name: platform-microservice
+description: Centralized Helm chart for Inventium platform microservices (Deployment, Service, ConfigMap/Secret, HPA, PDB, Gateway API HTTPRoute/Ingress and an optional OpenTelemetry sidecar).
+type: application
+
+# Chart version. Bump on every change to the templates; consumers pin this.
+version: 2.0.0
+# Default application version. Every service overrides image.tag.
+appVersion: "1.0.0"
+
+home: https://github.com/InventiumOrg/platform-microservice
+sources:
+  - https://github.com/InventiumOrg/platform-microservice
+
+keywords:
+  - microservice
+  - platform
+  - golang
+  - opentelemetry
+  - gateway-api
+
+maintainers:
+  - name: Inventium Platform Team

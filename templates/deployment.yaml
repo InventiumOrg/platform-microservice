@@ -1,0 +1,166 @@
+{{- include "platform-microservice.validate" . -}}
+{{- $fullName := include "platform-microservice.fullname" . -}}
+{{- $envFrom := include "platform-microservice.envFrom" . -}}
+{{- $volumeMounts := include "platform-microservice.volumeMounts" . -}}
+{{- $volumes := include "platform-microservice.volumes" . -}}
+{{- $podAnnotations := dict -}}
+{{- if .Values.rollOnConfigChange -}}
+{{- if .Values.config -}}
+{{- $_ := set $podAnnotations "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) -}}
+{{- end -}}
+{{- if .Values.secrets -}}
+{{- $_ := set $podAnnotations "checksum/secrets" (include (print $.Template.BasePath "/secret.yaml") . | sha256sum) -}}
+{{- end -}}
+{{- if .Values.logging.enabled -}}
+{{- $_ := set $podAnnotations "checksum/otel-config" (include (print $.Template.BasePath "/otel-config.yaml") . | sha256sum) -}}
+{{- end -}}
+{{- end -}}
+{{- $podAnnotations = merge $podAnnotations (.Values.podAnnotations | default dict) (.Values.commonAnnotations | default dict) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ include "platform-microservice.namespace" . }}
+  labels:
+    {{- include "platform-microservice.labels" . | nindent 4 }}
+  {{- with include "platform-microservice.annotations" . | trim }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "platform-microservice.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with $podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "platform-microservice.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with include "platform-microservice.imagePullSecrets" . | trim }}
+      imagePullSecrets:
+        {{- . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "platform-microservice.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "platform-microservice.name" . }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "platform-microservice.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- include "platform-microservice.containerPorts" . | trim | nindent 12 }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $envFrom | trim }}
+          envFrom:
+            {{- . | nindent 12 }}
+          {{- end }}
+          {{- with $volumeMounts | trim }}
+          volumeMounts:
+            {{- . | nindent 12 }}
+          {{- end }}
+        {{- if .Values.logging.enabled }}
+        - name: otel-collector
+          image: {{ .Values.logging.otelCollector.image }}
+          args:
+            - --config=/etc/otelcol/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: otel-metrics
+              containerPort: 8888
+              protocol: TCP
+          volumeMounts:
+            - name: logs
+              mountPath: {{ .Values.logging.logPath }}
+              readOnly: true
+            - name: otel-collector-config
+              mountPath: /etc/otelcol
+          {{- with $envFrom | trim }}
+          envFrom:
+            {{- . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.logging.otelCollector.resources | nindent 12 }}
+        {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $volumes | trim }}
+      volumes:
+        {{- . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
