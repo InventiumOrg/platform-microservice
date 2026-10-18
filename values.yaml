@@ -318,3 +318,4 @@ logging:
     scrapeInterval: 30s
   extraLabels: {}
     # team: platform
+    team: test
